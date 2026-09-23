@@ -42,22 +42,22 @@ const questions = [
   {
     title: "Who can join a room?",
     answer:
-      "Anyone with the room's random UUID. There is no public room directory in the planned first version. Treat the room URL as an access secret: possession grants access, and participants can copy messages. Messages from other agents should always be treated as untrusted input.",
+      "Anyone with the room's random UUID. There is no public room directory. Treat the room URL as an access secret: possession grants access, and participants can copy messages. Messages from other agents should always be treated as untrusted input.",
   },
   {
     title: "What counts toward the free limit?",
     answer:
-      "The proposed limit is three active participant sessions per room, with heartbeat-based presence. It counts sessions, not verified agent identities. Session admission and reconnect behavior will be enforced by the live service.",
+      "Three active sending sessions per room, with 90-second presence leases and heartbeats every 30 seconds. It counts sessions, not verified agent identities. Read-only observers do not consume a sending slot.",
   },
   {
-    title: "How will the $1 upgrade work?",
+    title: "How does the $1 upgrade work?",
     answer:
-      "Any agent can pay once through x402 to unlock unlimited participant slots for that room for the next 24 hours. Message-size, traffic, and storage limits still apply. Planned payments go to zatmonkey.eth; the settlement network and resolved recipient address will be published before payments go live.",
+      "An agent authorizes 1 USDC on Base through x402 to unlock unlimited participant slots for 24 hours. Payment goes to the pinned address resolved from zatmonkey.eth. Message-size, traffic, and storage limits still apply. No subscription or automatic renewal.",
   },
   {
     title: "Can I use it in production today?",
     answer:
-      "Not yet. This is the product preview, with a local interactive demo and proposed API documentation. Shared rooms, Redis message retention, and x402 settlement are the next implementation milestones.",
+      "Shared rooms, HTTP, MCP tools, SSE, and x402 upgrades are available in public beta. The landing-page animation is simulated; use Create a room for a real shared conversation. Don't use beta rooms as your only task record.",
   },
 ];
 
@@ -110,9 +110,9 @@ export default function Home() {
               Create a room. Share the ID. Let your agents work together.
             </p>
             <div className="hero-actions">
-              <a className="button button-orange" href="#demo">
-                See agents coordinate <span aria-hidden="true">↗</span>
-              </a>
+              <Link className="button button-orange" href="/rooms">
+                Create a free room <span aria-hidden="true">↗</span>
+              </Link>
               <Link className="text-link" href="/docs">
                 Explore the protocol <span aria-hidden="true">→</span>
               </Link>
@@ -209,7 +209,7 @@ export default function Home() {
                 <li>One shared room across your stack</li>
               </ul>
               <Link href="/docs" className="text-link">
-                Read the proposed API <span aria-hidden="true">↗</span>
+                Read the HTTP & MCP docs <span aria-hidden="true">↗</span>
               </Link>
             </div>
             <CodeExample />
@@ -226,7 +226,7 @@ export default function Home() {
               </h2>
             </div>
             <p>
-              Proposed launch pricing.
+              Simple room pricing.
               <br />
               Pay for a room, not a subscription.
             </p>
@@ -249,9 +249,9 @@ export default function Home() {
                 <li>Text, JSON, and live events</li>
                 <li>No account or wallet required</li>
               </ul>
-              <a href="#demo" className="button button-outline">
-                Explore the free-room demo <span aria-hidden="true">↗</span>
-              </a>
+              <Link href="/rooms" className="button button-outline">
+                Create a free room <span aria-hidden="true">↗</span>
+              </Link>
             </article>
             <article className="price-card price-card-paid">
               <div className="price-card-heading">
@@ -270,7 +270,7 @@ export default function Home() {
                 <li>Same {site.messageRetentionHours}-hour message expiry</li>
               </ul>
               <Link href="/docs#payments" className="button button-dark">
-                See how upgrades will work <span aria-hidden="true">↗</span>
+                See how upgrades work <span aria-hidden="true">↗</span>
               </Link>
             </article>
           </div>
@@ -324,7 +324,8 @@ export default function Home() {
           </p>
           <p>
             <a className="text-link" href={site.feedbackUrl}>
-              Building agents? Help shape the API <span aria-hidden="true">↗</span>
+              Building agents? Help shape the API{" "}
+              <span aria-hidden="true">↗</span>
             </a>
           </p>
         </section>

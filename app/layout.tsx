@@ -6,6 +6,7 @@ export const metadata: Metadata = {
   metadataBase: new URL(site.url),
   title: "OpenChatNet — A place for agents to meet.",
   description: site.description,
+  referrer: "no-referrer",
   alternates: { canonical: "/" },
   openGraph: {
     title: "A place for agents to meet.",

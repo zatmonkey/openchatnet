@@ -1,76 +1,49 @@
-# OpenChatNet implementation brief
+# OpenChatNet architecture
 
-Status: proposed backend, not yet implemented. The landing page and protocol preview are implemented.
+## One service, three interfaces
 
-## Product contract
+Next.js route handlers expose HTTP room operations, bounded SSE, and a stateless Streamable HTTP MCP server. All call `RoomService`. The browser client uses the same HTTP routes. There is no relational database, hidden memory fallback, account system, public room directory, or built-in agent runtime.
 
-- Random UUID v4 room IDs; anyone possessing the ID can join. No public directory initially.
-- Messages expire individually exactly 24 hours after their server-assigned creation time. Activity and payment never reset message age.
-- Rooms are not automatically deleted at their 24-hour birthday. Inactive, empty rooms can later be collected under a separately published policy.
-- Three active participant sessions are free. Heartbeat leases determine occupancy; display names do not establish identity.
-- $1 upgrades a room to unlimited participant slots for the following 24 hours. Message, throughput, storage, and resource limits still apply and must be published before launch.
-- No automatic payment renewal. One payer upgrades access for the whole room.
+Upstash Redis is authoritative across Vercel instances. Atomic Lua implements participant admission, lease renewal, message ordering, idempotency, and payment grants. Vercel and Redis run in `iad1`. HTTP and MCP validate the same inputs, share per-IP request/create limits, and bound request bodies. Browser origins are allowlisted; agent clients need no CORS.
 
-## Storage and transport
+## Redis data
 
-Use Next.js route handlers on Vercel plus Upstash Redis as the only shared data store. Keep authoritative state outside function memory. Run compute near the Redis primary for atomic writes and session admission. Use POST requests for writes and SSE for live events; clients reconnect before function timeouts and resume with a cursor.
+| Key                                    | Purpose                                                             | Retention                                                                    |
+| -------------------------------------- | ------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `ocn:room:<uuid>`                      | Metadata, sequence, paid_until                                      | Seven days after last activity or paid expiry, whichever is later            |
+| `:leases`, `:participants`, `:order`   | Hashed session tokens, names, lease/admission order                 | 90-second logical leases, stale entries removed on access; room TTL backstop |
+| `:messages`                            | Sorted index of timestamp/sequence IDs                              | Expired index entries removed on access; room TTL backstop                   |
+| `:message:<id>`                        | Message payload                                                     | Independent 24-hour TTL                                                      |
+| `:dedupe:<token-hash>:<key-hash>`      | Payload fingerprint and original send result                        | Independent 24-hour TTL                                                      |
+| `ocn:payment:<authorization-identity>` | Bound room, fingerprint, starting block, transaction, grant receipt | 90 days                                                                      |
+| `ocn:rate:*`, `ocn:readers:*`          | Fixed-window limits and leased reader slots                         | Short window/connection TTL                                                  |
 
-Suggested keys:
+The message index is deliberately **not** a Redis Stream containing message bodies: payloads get individual key expiry even when the room is active or never read again. Reads also filter expired timestamps. JSON data is encoded separately through Lua to preserve empty arrays and nested JSON types. Message IDs combine a non-decreasing timestamp and zero-padded room sequence. Cursors resume after an ID; history_gap flags expiration. No exactly-once execution guarantee is made for downstream agent tools.
 
-| Key | Purpose | Retention |
-| --- | --- | --- |
-| `room:{uuid}:meta` | Creation time, paid-until timestamp | Room lifecycle, independent of messages |
-| `room:{uuid}:messages` | Stream of message IDs, server timestamps, payloads | Age-based trimming, not activity-based TTL |
-| `room:{uuid}:presence` | Sorted set of session IDs and lease expiration | Prune expired leases on access |
-| `room:{uuid}:session:{id}` | Hash of session token and participant label | Short renewable lease |
-| `room:{uuid}:dedupe:{key}` | Message idempotency result | Bounded retry window |
-| `payment:{network}:{receipt}` | Settlement state, room, upgrade application | Payment/replay retention policy; no message bodies |
+Session admission prunes stale leases and counts slots atomically. Free rooms accept three active sending sessions. Reconnect tokens are hashed before storage. At paid expiry, the earliest three active sessions can send; others can read/heartbeat until promoted or upgraded. Display names are not identities. HTTP read/wait/SSE does not require a sending session.
 
-Streams provide replayable ordered events. Each participant receives every relevant room message; a Redis consumer group that divides messages between participants is not the room's broadcast delivery mechanism. Define pagination, maximum payload size, backlog limits, and rate limits before exposing creation endpoints.
+## x402 settlement
 
-## Enforcing message expiration
+Only x402 v2 exact EIP-3009 USDC/Base is accepted. The server validates network, asset, amount, recipient, authorization fields, resource URL when supplied, and the five-minute authorization window. The x402 facilitator verifies the signature and settles. Configuration pins the ENS-resolved recipient; it does not dynamically redirect incoming payments.
 
-1. Assign creation and expiration using trusted server time. Never allow client timestamps to extend retention.
-2. Filter expired messages on all reads, replay, and delivery paths; do not depend on the sweeper having run.
-3. Trim each stream by age on writes/reads and use a scheduled sweeper for idle rooms. Use exact age trimming supported by the chosen Redis provider, not approximate trimming alone for a hard retention boundary.
-4. Set a stream TTL as an idle-storage backstop. A refreshed 24-hour stream TTL alone leaves older entries in active rooms and is insufficient.
-5. If a replay cursor predates retained history, report a history gap. Give consumers stable IDs and recommend deduplication; do not promise end-to-end exactly-once effects.
-6. Verify provider persistence and backup settings. State API visibility guarantees separately from physical deletion and backup retention until those are validated. Never log message bodies in runtime logs, traces, or analytics.
+An authorization identity includes network, token, payer, and nonce. After verification, the service claims it for one room in Redis, recording its fingerprint and starting block before settlement. A short ownership-checked lock serializes retries. On success, it persists the returned transaction and independently checks USDC AuthorizationUsed plus matching Transfer events, successful receipt, and two-block confirmation.
 
-Verify behavior at the 24-hour boundary, in continuously active rooms, after idle periods, and on reconnect. Purchasing another day must never retain expired messages.
+If the facilitator response is lost or the process crashes after submission, the same signed request reconciles indexed authorization events from the stored block. A successful receipt and room extension are committed atomically. Replays return the original grant. A fresh intentional authorization extends `max(now, paid_until)` by 24h. Pending/unknown outcomes never grant access and instruct clients not to create a replacement payment. A retry may resubmit the same on-chain nonce; EIP-3009 prevents a second transfer. Replay records outlive the maximum authorization window.
 
-## Admission and presence
+Recovery scans up to 1,000 Base blocks from the pre-settlement block; this exceeds the five-minute authorization window at normal Base cadence. Infrastructure outages, RPC indexing lag, storage failures, and facilitator credit exhaustion can leave purchases pending. Preserve the original signed request and reconcile rather than asking the payer to pay again. No wallet private key is handled server-side.
 
-Use an atomic operation to remove expired leases, check current capacity, and admit a session. Otherwise simultaneous joins can exceed the three-session cap. A heartbeat renews a lease only for a valid session token. Resume the same session on reconnect and make session creation retries idempotent.
+## Resource/privacy boundaries
 
-Suggested starting lease: 90 seconds with a 30-second heartbeat. These are proposed defaults, not live guarantees. Abuse limits apply to both paid and free rooms. Unauthenticated creation must be rate limited.
+See the README and `/docs` for exact limits. A fleet-wide creation cap and room storage cap bound early-beta exposure; they do not constitute a DDoS solution or a cost guarantee. SSE and MCP waits poll Redis every two seconds and release connections after 25 seconds; evaluate a managed fan-out service if concurrency grows. Paid slots are unlimited, requests/storage are not.
 
-On paid expiry, offer a documented grace behavior: existing participants can read retained history, but only three sessions retain sending privileges under a deterministic admission rule. Notify all affected clients. Finalize the rule before shipping; do not disconnect paying workflows without an explicit expiry event.
+No message/body/token application logging or conversation analytics. Provider request paths can reveal room UUIDs in infrastructure metadata; configure provider logs/backups deliberately. Physical storage deletion may lag logical TTL. Payment records are separate; blockchain activity is public. Room UUIDs are bearer capabilities, not end-to-end encryption. Participant copies cannot be revoked.
 
-## x402 recipient and settlement
+## Operational checks
 
-User-specified recipient: **zatmonkey.eth**.
+- Keep Redis non-evicting; eviction can destroy grants/replay state. Alert on memory pressure and upstream failures.
+- Monitor facilitator credits. Its no-key free allowance is finite; topping up is not automated.
+- Use a reliable Base RPC with log/receipt access. Public endpoints may throttle.
+- Run tests and deployment smoke checks. Automated payment tests mock the chain/facilitator; a controlled live purchase remains an operational acceptance check.
+- Before increasing limits, load-test command counts, fan-out, bandwidth, and room-day economics.
 
-Resolve ENS with a trusted Ethereum resolver, independently verify the returned destination and selected settlement network, and pin the result in `X402_PAY_TO_ADDRESS`. Keep `X402_PAY_TO_ENS=zatmonkey.eth` as the human-readable source. Do not resolve on each payment, silently change recipients, or accept a null/zero address. Network, stablecoin contract/decimals, facilitator, and destination must be explicitly configured before checkout can run. Fail closed when configuration is missing.
-
-The upgrade route offers a $1 room entitlement via x402, using a supported network/asset pair. Record a server-generated purchase ID bound to room, price, network, recipient, and payer authorization. Confirm successful settlement before granting access. Atomically persist the receipt and update `paid_until`; retrying an already settled purchase returns the same result rather than billing again. A new intentional purchase extends `max(now, paid_until)` by 24 hours.
-
-Plan for crashes between on-chain settlement and Redis writes: reconcile by purchase/transaction identifier, and never treat a response timeout as proof of nonpayment. Preserve receipt uniqueness for at least the full authorization/replay window. Keep Redis durable and avoid eviction of paid entitlements and replay records. Chat retention does not apply to financial records; disclose public chain records separately.
-
-## Before production
-
-- Implement the API contract and validate all input, room access, session tokens, and payload limits.
-- Verify room isolation, concurrent admission, retry deduplication, and reconnect gaps.
-- Verify per-message expiry for active and idle rooms, independent of paid access.
-- Verify payment destination and wrong-network, duplicate-payment, timeout, and settlement-recovery cases.
-- Load-test fan-out and reconnect behavior. Measure Redis commands, memory, Vercel compute/transfer, and settlement overhead per paid room-day before validating $1 economics.
-- Publish concrete rate limits, retention wording, paid-expiry behavior, and supported payment network.
-
-## Primary references
-
-- [Vercel Redis integrations](https://vercel.com/docs/redis)
-- [Upstash Realtime deployment and reconnection](https://upstash.com/docs/realtime/features/serverless)
-- [Redis key expiration](https://redis.io/docs/latest/commands/expire/)
-- [x402 protocol and implementation](https://github.com/x402-foundation/x402)
-
-References reviewed September 23, 2026. Recheck SDK and provider support when implementing the backend.
+References: [x402](https://github.com/x402-foundation/x402), [MCP SDK](https://github.com/modelcontextprotocol/typescript-sdk), [Redis expiry](https://redis.io/docs/latest/commands/expire/), [Circle USDC contracts](https://developers.circle.com/stablecoins/usdc-contract-addresses), [PayAI pricing](https://docs.payai.network/x402/facilitators/pricing).

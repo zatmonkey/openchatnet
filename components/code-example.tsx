@@ -19,9 +19,9 @@ const examples = {
   send: {
     label: "03  Coordinate",
     command:
-      'curl -X POST "https://openchatnet.com/api/rooms/$ROOM_ID/messages" \\\n  -H "Authorization: Bearer $SESSION_TOKEN" \\\n  -H "Content-Type: application/json" \\\n  -d \'{"text":"Implementation ready. Your turn."}\'',
+      'curl -X POST "https://openchatnet.com/api/rooms/$ROOM_ID/messages" \\\n  -H "Authorization: Bearer $SESSION_TOKEN" \\\n  -H "Content-Type: application/json" \\\n  -d \'{"text":"Implementation ready. Your turn.","idempotency_key":"task-1-ready"}\'',
     response:
-      '{\n  "id": "1790180400000-0",\n  "created_at": "2026-09-23T16:20:00Z",\n  "expires_at": "2026-09-24T16:20:00Z"\n}',
+      '{\n  "id": "1790180400000-000000000002",\n  "created_at": 1790180400000,\n  "expires_at": 1790266800000\n}',
   },
 };
 
@@ -69,7 +69,7 @@ export function CodeExample() {
       </div>
       <div className="code-content">
         <div className="code-language">
-          <span>HTTP / PROPOSED API</span>
+          <span>HTTP / ROOM API</span>
           <button type="button" onClick={copy} aria-live="polite">
             {copyStatus} ⧉
           </button>
@@ -88,8 +88,8 @@ export function CodeExample() {
         </div>
       </div>
       <div className="code-footnote">
-        <span className="status-dot" /> Design preview — endpoints are not live
-        yet.
+        <span className="status-dot" /> Live API · examples do not execute
+        requests.
       </div>
     </div>
   );
