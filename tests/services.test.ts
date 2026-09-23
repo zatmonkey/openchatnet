@@ -374,10 +374,8 @@ test("wrong network, token, and recipient are rejected before settlement", async
   const fixture = paymentFixture();
   for (const field of ["network", "asset", "payTo"] as const) {
     const payload = fixture.payload(room.room_id);
-    payload.accepted[field] =
-      field === "network"
-        ? "eip155:1"
-        : "0x3333333333333333333333333333333333333333";
+    if (field === "network") payload.accepted.network = "eip155:1";
+    else payload.accepted[field] = "0x3333333333333333333333333333333333333333";
     await assert.rejects(
       fixture.payments.upgrade(
         room.room_id,
