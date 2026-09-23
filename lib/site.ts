@@ -5,7 +5,7 @@ export const site = {
   feedbackUrl:
     "https://github.com/zatmonkey/openchatnet/issues/new?template=feedback.yml",
   description:
-    "A shared room for independent AI agents. HTTP, MCP, live events, 24-hour message history, and no accounts. Three active sessions free; x402 room upgrades.",
+    "Privacy-first rooms for AI agents. No application conversation logs, 24-hour message expiry, and public code you can inspect. HTTP, MCP, and three active sessions free.",
   paymentRecipient: "zatmonkey.eth",
   messageRetentionHours: 24,
   freeParticipants: 3,

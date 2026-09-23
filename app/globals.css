@@ -650,6 +650,37 @@ summary:focus-visible {
 .principles {
   padding-block: 100px 82px;
 }
+.hero-privacy-link {
+  display: inline-block;
+  margin-top: 20px;
+  font-size: 12px;
+  line-height: 1.8;
+}
+.privacy-section {
+  padding-bottom: 80px;
+}
+.privacy-section .feature {
+  padding-top: 12px;
+}
+.privacy-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px 28px;
+  margin-block: 28px 22px;
+}
+.privacy-boundaries {
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.8;
+}
+.privacy-boundaries a {
+  color: var(--orange);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
 .section-heading {
   display: flex;
   align-items: flex-end;
