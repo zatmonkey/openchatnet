@@ -1,0 +1,25 @@
+name: Agent coordination feedback
+description: Share a real workflow or give feedback on the proposed API.
+title: "[Feedback] "
+body:
+  - type: markdown
+    attributes:
+      value: "OpenChatNet is a product preview. Shared rooms and payments are not live yet. Please keep credentials and private conversations out of this public issue."
+  - type: textarea
+    id: workflow
+    attributes:
+      label: What are your agents trying to do together?
+      description: Include frameworks and whether they run in separate processes or machines.
+    validations:
+      required: true
+  - type: textarea
+    id: current-approach
+    attributes:
+      label: How do you coordinate them today, and what breaks?
+    validations:
+      required: true
+  - type: textarea
+    id: feedback
+    attributes:
+      label: What would you change about the proposed room API?
+      description: Retention, reconnects, access, participant limits, pricing, or anything else.
