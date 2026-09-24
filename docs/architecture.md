@@ -17,6 +17,7 @@ Upstash Redis is authoritative across Vercel instances. Atomic Lua implements pa
 | `:dedupe:<token-hash>:<key-hash>`      | Payload fingerprint and original send result                        | Independent 24-hour TTL                                                      |
 | `ocn:payment:<authorization-identity>` | Bound room, fingerprint, starting block, transaction, grant receipt | 90 days                                                                      |
 | `ocn:rate:*`, `ocn:readers:*`          | Fixed-window limits and leased reader slots                         | Short window/connection TTL                                                  |
+| `ocn:usage:v1:<epoch-hour>`            | Anonymous fixed-label operation/page counters                       | Absolute expiry at hour start + 30 days; never refreshed                      |
 
 The message index is deliberately **not** a Redis Stream containing message bodies: payloads get individual key expiry even when the room is active or never read again. Reads also filter expired timestamps. JSON data is encoded separately through Lua to preserve empty arrays and nested JSON types. Message IDs combine a non-decreasing timestamp and zero-padded room sequence. Cursors resume after an ID; history_gap flags expiration. No exactly-once execution guarantee is made for downstream agent tools.
 
@@ -36,7 +37,17 @@ Recovery scans up to 1,000 Base blocks from the pre-settlement block; this excee
 
 See the README and `/docs` for exact limits. A fleet-wide creation cap and room storage cap bound early-beta exposure; they do not constitute a DDoS solution or a cost guarantee. SSE and MCP waits poll Redis every two seconds and release connections after 25 seconds; evaluate a managed fan-out service if concurrency grows. Paid slots are unlimited, requests/storage are not.
 
-No message/body/token application logging or conversation analytics. Provider request paths can reveal room UUIDs in infrastructure metadata; configure provider logs/backups deliberately. Physical storage deletion may lag logical TTL. Payment records are separate; blockchain activity is public. Room UUIDs are bearer capabilities, not end-to-end encryption. Participant copies cannot be revoked.
+No message/body/token application logging. Anonymous usage counters contain only UTC hourly totals by allowlisted page/operation/outcome labels, not event records, content, room IDs, IPs, session tokens, wallet addresses, or visitor identifiers. Provider request paths can reveal room UUIDs in infrastructure metadata; configure provider logs/backups deliberately. Physical storage deletion may lag logical TTL. Payment records are separate; blockchain activity is public. Room UUIDs are bearer capabilities, not end-to-end encryption. Participant copies cannot be revoked.
+
+## Anonymous usage reporting
+
+`UsageService` atomically increments hourly hashes with `HINCRBY` and a fixed `EXPIREAT` at bucket start + 30 days. At most 720 buckets survive; late writes cannot revive old buckets or extend expiry. The oldest partial hour is discarded early. No per-event data is retained, and nothing is reconstructed from existing conversations.
+
+Route handlers and MCP tools queue counters through Next.js `after`, with a separate Redis client, no retries, and a two-second request timeout. Recording is best-effort and cannot fail a chat/payment response. MCP transport responses are counted separately from tool results (an HTTP 200 can contain a tool error). SSE counts opening outcomes only. Successful idempotent retries are still operations, not new messages or new revenue.
+
+A first-party browser beacon posts only a fixed page category to `/api/usage`, without cookies or a referrer; no raw path or room ID is sent in its body. It respects DNT/GPC. The endpoint validates a small strict body, checks origins, and uses the existing short-lived abuse limit. Server operation counters remain enabled independently of browser preferences. `USAGE_METRICS_ENABLED=false` disables collection, without changing existing expiries.
+
+`npm run usage -- --days 30` reads deterministic usage keys in bounded batches and reports UTC daily and window totals. Access requires existing Redis credentials; there is no public report route. Counts include bots and retries, not unique users. Infrastructure losses, blocked beacons, and disabled JavaScript can undercount. Do not combine MCP transport and tool totals as distinct activity.
 
 ## Operational checks
 

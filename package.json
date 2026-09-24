@@ -11,7 +11,9 @@
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test tests/*.test.ts",
-    "smoke": "node scripts/smoke.mjs"
+    "smoke": "node scripts/smoke.mjs",
+    "usage": "tsx scripts/usage.ts",
+    "usage:check": "tsx scripts/usage-check.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "^2.1.0",

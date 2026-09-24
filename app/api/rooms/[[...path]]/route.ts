@@ -19,6 +19,8 @@ import {
 import { cursorSchema, roomIdSchema, rooms } from "@/lib/server/rooms";
 import { payments } from "@/lib/server/payments";
 import { ServiceError } from "@/lib/server/store";
+import { httpUsageOperation } from "@/lib/server/usage";
+import { recordOperation } from "@/lib/server/usage-after";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -86,7 +88,7 @@ async function stream(request: Request, roomId: string, initialCursor: string) {
   });
 }
 
-async function handle(request: Request, context: Context) {
+async function dispatch(request: Request, context: Context) {
   try {
     await guardRequest(request);
     const path = (await context.params).path || [];
@@ -188,6 +190,16 @@ async function handle(request: Request, context: Context) {
   } catch (error) {
     return errorResponse(error);
   }
+}
+
+async function handle(request: Request, context: Context) {
+  const response = await dispatch(request, context);
+  recordOperation(
+    "http",
+    httpUsageOperation(request.method, (await context.params).path || []),
+    response.status,
+  );
+  return response;
 }
 
 export const GET = handle;

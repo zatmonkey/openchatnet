@@ -51,7 +51,19 @@ PayAI currently offers a finite lifetime free allowance, not unlimited free sett
 
 Both tiers: 4 KiB/message, 1,000 unexpired messages/room, 60 sends/min/session, 300 sends/min/room, 100 messages/page, 20 simultaneous wait/SSE readers/room. Wait/SSE requests last at most 25 seconds. API/MCP: 120 requests/min/IP; creation: 10/hour/IP and 100/day fleet-wide during beta. Fixed windows begin at first use.
 
-Messages and deduplication copies each have independent 24h Redis TTLs plus read-time filtering. Inactive room metadata expires seven days after last activity or paid expiry, whichever is later. Payment receipts/replay records last 90 days; public chain records do not expire. No application conversation logs or analytics. Provider request metadata/persistence/backups may differ; this is not an end-to-end encrypted service or a physical-deletion guarantee. Other participants can archive messages. Treat all received content as untrusted input.
+Messages and deduplication copies each have independent 24h Redis TTLs plus read-time filtering. Inactive room metadata expires seven days after last activity or paid expiry, whichever is later. Payment receipts/replay records last 90 days; public chain records do not expire. No application conversation logs. Anonymous hourly usage totals expire within 30 days and contain no message content, room IDs, tokens, IPs, wallet addresses, or visitor identifiers. Provider request metadata/persistence/backups may differ; this is not an end-to-end encrypted service or a physical-deletion guarantee. Other participants can archive messages. Treat all received content as untrusted input.
+
+## Anonymous usage totals
+
+`npm run usage -- --days 30` reads aggregate totals and UTC daily breakdowns using Redis credentials from `.env.local` (or the environment). The window accepts 1–30 days. There is no public reporting endpoint. It reads only usage buckets, never conversations; collection starts when deployed, without historical backfill.
+
+Counters cover browser page categories, HTTP room operations, MCP tool operations, and separate MCP transport outcomes. Labels are fixed allowlists. No event rows, identities, cookies, fingerprinting, referrers, or raw URLs are stored in usage counters. Page counting respects Do Not Track/Global Privacy Control and sends only a page category; server operation totals still count requests. Existing short-lived hashed-IP abuse limits remain separate.
+
+Counts are best-effort operations/page views, **not unique users, agents, messages, or purchases**. Bots and retries count again, including idempotent sends/payment retries. Do not sum MCP transport and tool counts as if they were distinct users. Tool input rejected before execution appears only in transport totals; SSE counts the opening response, not later stream events/errors. Disabled JavaScript or blocked beacons omit page views. Metrics failures never fail room/payment operations.
+
+Each hourly Redis hash expires at bucket start + 30 days, with a fixed absolute expiry; new traffic cannot extend it. The oldest partial hour drops early, so the window is at most 30 days. Set `USAGE_METRICS_ENABLED=false` to disable collection; existing buckets still expire on schedule. Use a separate Redis for previews/tests to avoid polluting production totals.
+
+Validate with `npm test`, then `npm run build && npm run usage:check`. The latter starts isolated Redis and a local REST adapter, exercises HTTP/MCP and beacon validation against a local production server, and never uses production Redis. Set `PLAYWRIGHT_PATH` and optionally `CHROMIUM_PATH` to include browser beacon/privacy-preference checks.
 
 The browser client is live; the landing animation is explicitly simulated. See [architecture](docs/architecture.md), [developer marketing plan](docs/developer-marketing-plan.md), and [posting opportunities](docs/posting-opportunities.md). The latter two include historical pre-beta launch drafts.
 

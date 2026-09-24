@@ -8,17 +8,30 @@ import { z } from "zod";
 import { createFor, errorDetails, waitFor } from "./http";
 import { cursorSchema, roomIdSchema, rooms, tokenSchema } from "./rooms";
 import { payments } from "./payments";
+import { recordOperation } from "./usage-after";
+import type { UsageOperation } from "./usage";
 
 async function result(
+  name: UsageOperation,
   operation: () => Promise<unknown>,
 ): Promise<CallToolResult> {
   try {
     const value = await operation();
+    const status =
+      name === "upgrade_room" &&
+      value &&
+      typeof value === "object" &&
+      "status" in value &&
+      value.status === 402
+        ? 402
+        : 200;
+    recordOperation("mcp", name, status);
     return {
       content: [{ type: "text", text: JSON.stringify(value) }],
       structuredContent: value as Record<string, unknown>,
     };
   } catch (error) {
+    recordOperation("mcp", name, errorDetails(error).status);
     return {
       isError: true,
       content: [{ type: "text", text: JSON.stringify(errorDetails(error)) }],
@@ -43,7 +56,7 @@ export const mcp = createMcpHandler(
         description: "Create a UUID room. Three active sessions are free.",
         inputSchema: z.object({}),
       },
-      () => result(() => createFor(requestInfo!)),
+      () => result("create_room", () => createFor(requestInfo!)),
     );
     server.registerTool(
       "room_info",
@@ -52,7 +65,7 @@ export const mcp = createMcpHandler(
         inputSchema: z.object(room),
         annotations: { readOnlyHint: true },
       },
-      ({ room_id }) => result(() => rooms.info(room_id)),
+      ({ room_id }) => result("room_info", () => rooms.info(room_id)),
     );
     server.registerTool(
       "join_room",
@@ -66,7 +79,7 @@ export const mcp = createMcpHandler(
         }),
       },
       ({ room_id, name, session_token }) =>
-        result(() => rooms.join(room_id, name, session_token)),
+        result("join_room", () => rooms.join(room_id, name, session_token)),
     );
     server.registerTool(
       "heartbeat",
@@ -76,7 +89,7 @@ export const mcp = createMcpHandler(
         inputSchema: z.object(session),
       },
       ({ room_id, session_token }) =>
-        result(() => rooms.heartbeat(room_id, session_token)),
+        result("heartbeat", () => rooms.heartbeat(room_id, session_token)),
     );
     server.registerTool(
       "send_message",
@@ -91,7 +104,9 @@ export const mcp = createMcpHandler(
         }),
       },
       ({ room_id, session_token, ...content }) =>
-        result(() => rooms.send(room_id, session_token, content)),
+        result("send_message", () =>
+          rooms.send(room_id, session_token, content),
+        ),
     );
     server.registerTool(
       "read_messages",
@@ -106,7 +121,7 @@ export const mcp = createMcpHandler(
         annotations: { readOnlyHint: true },
       },
       ({ room_id, after_cursor, limit }) =>
-        result(() => rooms.read(room_id, after_cursor, limit)),
+        result("read_messages", () => rooms.read(room_id, after_cursor, limit)),
     );
     server.registerTool(
       "wait_for_messages",
@@ -121,7 +136,7 @@ export const mcp = createMcpHandler(
         annotations: { readOnlyHint: true },
       },
       ({ room_id, after_cursor, timeout_seconds }) =>
-        result(() =>
+        result("wait_for_messages", () =>
           waitFor(room_id, after_cursor, timeout_seconds, requestInfo?.signal),
         ),
     );
@@ -132,7 +147,7 @@ export const mcp = createMcpHandler(
         inputSchema: z.object(session),
       },
       ({ room_id, session_token }) =>
-        result(() => rooms.leave(room_id, session_token)),
+        result("leave_room", () => rooms.leave(room_id, session_token)),
     );
     server.registerTool(
       "upgrade_room",
@@ -145,7 +160,7 @@ export const mcp = createMcpHandler(
         }),
       },
       ({ room_id, payment_signature }) =>
-        result(async () => {
+        result("upgrade_room", async () => {
           const service = payments();
           if (payment_signature)
             return service.upgrade(room_id, payment_signature);

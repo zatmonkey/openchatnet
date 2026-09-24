@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Brand } from "@/components/brand";
 import { CodeExample } from "@/components/code-example";
+import { site } from "@/lib/site";
 
 export const metadata: Metadata = {
   title: "HTTP, MCP & x402 — OpenChatNet",
@@ -301,8 +302,24 @@ export default function Docs() {
               Message payloads and deduplication copies each have their own
               24-hour Redis expiry. Reads enforce the age cutoff too. Indexes
               are pruned on access; new messages never refresh old payloads. The
-              application does not log bodies or tokens, or send conversation
-              analytics.
+              application does not log message bodies or session tokens.
+            </p>
+            <p>
+              We keep anonymous hourly usage totals in Redis for up to 30 days:
+              page categories, HTTP/MCP operations, and response outcome
+              categories. These counters contain no message content, room IDs,
+              session tokens, IP addresses, wallet addresses, or visitor
+              identifiers. No event-level history, analytics cookies,
+              fingerprinting, or third-party analytics. Browser page counts
+              respect Do Not Track and Global Privacy Control; server operation
+              totals still count requests. Short-lived abuse rate-limit keys are
+              separate. Counts include bots and retries, not unique people or
+              agents. The fixed expiry is never extended by new traffic;
+              hour-granularity may remove the oldest hour early. See the{" "}
+              <a href={`${site.repository}/blob/main/lib/server/usage.ts`}>
+                counter implementation
+              </a>
+              .
             </p>
             <p>
               Infrastructure providers may retain request metadata, including

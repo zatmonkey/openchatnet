@@ -13,6 +13,14 @@ import {
   type SettlementGateway,
 } from "../lib/server/payments";
 import { ServiceError, type Store } from "../lib/server/store";
+import {
+  UsageService,
+  httpUsageOperation,
+  usageHour,
+  usageKey,
+  usageOutcome,
+} from "../lib/server/usage";
+import { usagePage } from "../lib/usage-pages";
 
 let server: RedisMemoryServer;
 let redis: Redis;
@@ -43,6 +51,134 @@ async function joined() {
   const room = await service.create();
   return { room, participant: await service.join(room.room_id, "builder") };
 }
+
+test("anonymous usage increments atomically with a fixed expiry that activity cannot extend", async () => {
+  const usage = new UsageService(database, () => now);
+  const hour = Math.floor(now / usageHour);
+  now = hour * usageHour + 1000;
+  const metric = "http.send_message.success";
+  const results = await Promise.all(
+    Array.from({ length: 20 }, () => usage.record(metric)),
+  );
+  assert.ok(results.every(Boolean));
+  const key = usageKey(hour);
+  assert.equal(await redis.hget(key, metric), "20");
+  const expectedExpiry = ((hour + 720) * usageHour) / 1000;
+  assert.equal(await redis.call("EXPIRETIME", key), expectedExpiry);
+  now += usageHour - 2000;
+  await usage.record(metric);
+  assert.equal(await redis.call("EXPIRETIME", key), expectedExpiry);
+  now += 2000;
+  await usage.record(metric);
+  assert.equal(await redis.hget(usageKey(hour + 1), metric), "1");
+  assert.equal((await usage.report()).totals[metric], 22);
+});
+
+test("usage rejects identifiers, unknown labels, future and expired buckets before touching Redis", async () => {
+  let calls = 0;
+  const usage = new UsageService(
+    {
+      async eval<T>() {
+        calls++;
+        return 1 as T;
+      },
+    },
+    () => now,
+  );
+  for (const label of [
+    randomUUID(),
+    "page./rooms/private.success",
+    "http.create_room.secret",
+    "__proto__",
+    "page.home.success\nsecret",
+  ])
+    assert.equal(await usage.record(label), false);
+  assert.equal(await usage.record("page.home.success", now + usageHour), false);
+  assert.equal(await usage.record("page.home.success", now - 30 * day), false);
+  assert.equal(await usage.record("page.home.success", NaN), false);
+  assert.equal(calls, 0);
+});
+
+test("usage writes never refresh an old bucket to a fresh 30-day lifetime", async () => {
+  const usage = new UsageService(database, () => now);
+  const oldHour = Math.floor(now / usageHour) - 719;
+  assert.equal(
+    await usage.record("page.home.success", oldHour * usageHour),
+    true,
+  );
+  const key = usageKey(oldHour);
+  const ttl = await redis.ttl(key);
+  assert.ok(ttl > 0 && ttl <= 3600);
+  now += usageHour;
+  assert.equal(
+    await usage.record("page.home.success", oldHour * usageHour),
+    false,
+  );
+  assert.equal((await usage.report()).totals["page.home.success"], undefined);
+});
+
+test("usage reports only allowlisted counters from the requested window and never read conversations", async () => {
+  const hour = Math.floor(now / usageHour);
+  await redis.hset(
+    usageKey(hour),
+    "page.home.success",
+    3,
+    "private-field",
+    "secret",
+  );
+  await redis.hset(usageKey(hour - 24), "page.home.success", 7);
+  await redis.set("ocn:room:private", "private conversation");
+  const keysRead: string[] = [];
+  const usage = new UsageService(
+    {
+      async eval<T>(script: string, keys: string[], args: (string | number)[]) {
+        keysRead.push(...keys);
+        return database.eval<T>(script, keys, args);
+      },
+    },
+    () => now,
+  );
+  const report = await usage.report(1);
+  assert.deepEqual(report.totals, { "page.home.success": 3 });
+  assert.equal(report.populated_hours, 1);
+  assert.equal(keysRead.length, 24);
+  assert.ok(keysRead.every((key) => /^ocn:usage:v1:\d+$/.test(key)));
+  assert.equal((await usage.report(30)).totals["page.home.success"], 10);
+  assert.ok(!JSON.stringify(report).includes("secret"));
+  for (const days of [0, -1, 31, 1.5, NaN])
+    await assert.rejects(usage.report(days));
+});
+
+test("usage storage failures are best-effort for writes but visible to the private report", async () => {
+  const usage = new UsageService({
+    async eval() {
+      throw new Error("unavailable");
+    },
+  });
+  assert.equal(await usage.record("http.create_room.success"), false);
+  await assert.rejects(usage.report(), /unavailable/);
+});
+
+test("usage labels classify operations and outcomes without retaining URLs or room IDs", () => {
+  const room = randomUUID();
+  assert.equal(httpUsageOperation("POST", []), "create_room");
+  assert.equal(httpUsageOperation("GET", [room]), "room_info");
+  assert.equal(httpUsageOperation("GET", [room, "messages"]), "read_messages");
+  assert.equal(httpUsageOperation("POST", [room, "messages"]), "send_message");
+  assert.equal(httpUsageOperation("POST", [room, "upgrade"]), "upgrade_room");
+  assert.equal(httpUsageOperation("GET", [room, "private-secret"]), "unknown");
+  assert.equal(
+    httpUsageOperation("GET", [room, "messages", "extra"]),
+    "unknown",
+  );
+  assert.equal(usagePage(`/rooms/${room}`), "room");
+  assert.equal(usagePage("/private-path"), undefined);
+  assert.equal(usageOutcome(201), "success");
+  assert.equal(usageOutcome(402), "payment_required");
+  assert.equal(usageOutcome(429), "rate_limited");
+  assert.equal(usageOutcome(409), "client_error");
+  assert.equal(usageOutcome(503), "server_error");
+});
 
 test("concurrent admission grants exactly three free slots and resumes without another slot", async () => {
   const room = await service.create();
