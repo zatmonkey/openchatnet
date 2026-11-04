@@ -2,6 +2,9 @@ export const roomScript = `
 local operation = ARGV[1]
 local now = tonumber(ARGV[2])
 local input = cjson.decode(ARGV[3])
+local participantLimit = input.limits.participants
+local messageLimit = input.limits.retainedMessages
+local messageRate = input.limits.messagesPerMinute
 local day = 86400000
 local roomTtl = 604800
 local function failure(code)
@@ -11,7 +14,7 @@ if operation == 'create' then
   if redis.call('EXISTS', KEYS[1]) == 1 then return failure('ROOM_EXISTS') end
   redis.call('HSET', KEYS[1], 'created_at', now, 'paid_until', 0, 'sequence', 0)
   redis.call('EXPIRE', KEYS[1], roomTtl)
-  return cjson.encode({room_id = input.room_id, message_retention_hours = 24, participant_limit = 3})
+  return cjson.encode({room_id = input.room_id, message_retention_hours = 24, participant_limit = participantLimit})
 end
 if redis.call('EXISTS', KEYS[1]) == 0 then return failure('ROOM_NOT_FOUND') end
 local expired = redis.call('ZRANGEBYSCORE', KEYS[2], '-inf', now)
@@ -27,10 +30,10 @@ local ttl = math.max(roomTtl, math.ceil((paidUntil - now) / 1000) + roomTtl)
 for _, key in ipairs(KEYS) do redis.call('EXPIRE', key, ttl) end
 local function canSend(token)
   local rank = redis.call('ZRANK', KEYS[4], token)
-  return rank and (paid or rank < 3)
+  return rank and (paid or rank < participantLimit)
 end
 if operation == 'info' then
-  return cjson.encode({room_id = input.room_id, created_at = tonumber(redis.call('HGET', KEYS[1], 'created_at')), paid_until = paidUntil, participant_limit = paid and cjson.null or 3, active_participants = redis.call('ZCARD', KEYS[2]), message_retention_hours = 24})
+  return cjson.encode({room_id = input.room_id, created_at = tonumber(redis.call('HGET', KEYS[1], 'created_at')), paid_until = paidUntil, participant_limit = paid and cjson.null or participantLimit, active_participants = redis.call('ZCARD', KEYS[2]), message_retention_hours = 24})
 end
 if operation == 'join' then
   local existing = redis.call('HGET', KEYS[3], input.token_hash)
@@ -41,7 +44,7 @@ if operation == 'join' then
     return cjson.encode(participant)
   end
   if input.resume then return failure('SESSION_EXPIRED') end
-  if not paid and redis.call('ZCARD', KEYS[2]) >= 3 then return failure('ROOM_FULL') end
+  if not paid and redis.call('ZCARD', KEYS[2]) >= participantLimit then return failure('ROOM_FULL') end
   local sequence = redis.call('HINCRBY', KEYS[1], 'sequence', 1)
   local participant = {participant_id = input.participant_id, name = input.name, joined_at = now}
   redis.call('HSET', KEYS[3], input.token_hash, cjson.encode(participant))
@@ -96,8 +99,8 @@ if operation == 'send' then
     if previous.message.expires_at > now then return cjson.encode(previous.message) end
   end
   if not canSend(input.token_hash) then return failure('ROOM_FULL') end
-  if redis.call('ZCARD', KEYS[5]) >= 1000 then return failure('ROOM_STORAGE_FULL') end
-  for _, rate in ipairs({{KEYS[1] .. ':rate', 300}, {KEYS[1] .. ':rate:' .. input.token_hash, 60}}) do
+  if redis.call('ZCARD', KEYS[5]) >= messageLimit then return failure('ROOM_STORAGE_FULL') end
+  for _, rate in ipairs({{KEYS[1] .. ':rate', messageRate}, {KEYS[1] .. ':rate:' .. input.token_hash, 60}}) do
     local count = redis.call('INCR', rate[1])
     if count == 1 then redis.call('EXPIRE', rate[1], 60) end
     if count > rate[2] then return failure('RATE_LIMITED') end

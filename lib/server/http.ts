@@ -1,3 +1,4 @@
+import { roomLimits } from './limits';
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { digest, roomIdSchema, rooms } from "./rooms";
@@ -88,7 +89,7 @@ export function callerKey(request: Request) {
 
 export async function guardRequest(request: Request) {
   checkOrigin(request);
-  await rateLimit(store, `requests:${callerKey(request)}`, 120, 60);
+  await rateLimit(store, `requests:${callerKey(request)}`, roomLimits().requestsPerMinute, 60);
 }
 
 export async function createFor(request: Request) {
