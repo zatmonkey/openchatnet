@@ -5,6 +5,7 @@ import { RedisMemoryServer } from "redis-memory-server";
 import Redis from "ioredis";
 import { encodePaymentSignatureHeader } from "@x402/core/http";
 import type { PaymentPayload, SettleResponse } from "@x402/core/types";
+import { nativeStore } from "../lib/server/native-store";
 import { RoomService, roomKey } from "../lib/server/rooms";
 import {
   PaymentService,
@@ -622,4 +623,17 @@ test('private deployment supports a full independent-agent roster without changi
  assert.equal((await internal.info(room.room_id)).active_participants,64);
  assert.equal((await internal.info(room.room_id)).participant_limit,64);
  const publicRoom=await service.create();assert.equal(publicRoom.participant_limit,3);
+});
+
+
+test("private native Redis supports the same room service and isolates its database", async()=>{
+  const privateDb=nativeStore(`redis://${await server.getHost()}:${await server.getPort()}/1`);
+  try {
+    const privateRooms=new RoomService(privateDb,()=>now);
+    const room=await privateRooms.create(),sender=await privateRooms.join(room.room_id,"reader");
+    assert.ok(room.room_id);
+    assert.ok(sender.participant_id);
+    assert.equal(await redis.exists(roomKey(room.room_id)),0);
+    assert.equal(await privateDb.eval<number>('return redis.call("EXISTS",KEYS[1])',[roomKey(room.room_id)],[]),1);
+  } finally {privateDb.close();}
 });
