@@ -1,3 +1,4 @@
+import { nativeStore } from "./native-store";
 import { Redis } from "@upstash/redis";
 
 export interface Store {
@@ -9,9 +10,14 @@ export interface Store {
 }
 
 let redis: Redis | undefined;
+let privateRedis: ReturnType<typeof nativeStore> | undefined;
 
 export const store: Store = {
   async eval<T>(script: string, keys: string[], args: (string | number)[]) {
+    if (process.env.REDIS_URL) {
+      privateRedis ??= nativeStore(process.env.REDIS_URL);
+      return privateRedis.eval<T>(script,keys,args);
+    }
     const url =
       process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL;
     const token =
