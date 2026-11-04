@@ -609,3 +609,17 @@ test("paid rooms admit more than three; expiry keeps earliest three active sende
     idempotency_key: randomUUID(),
   });
 });
+
+test('private deployment supports a full independent-agent roster without changing public defaults',async()=>{
+ const {roomLimits}=await import('../lib/server/limits');
+ assert.equal(roomLimits({}).participants,3);
+ for(const value of ['0','257','NaN','3.5'])assert.throws(()=>roomLimits({OPENCHATNET_PARTICIPANT_LIMIT:value}));
+ const internal=new RoomService(database,()=>now,{participants:64,requestsPerMinute:2400,messagesPerMinute:1200,retainedMessages:20000});
+ const room=await internal.create();assert.equal(room.participant_limit,64);
+ const participants=[];for(let i=0;i<64;i++)participants.push(await internal.join(room.room_id,`agent-${i}`));
+ await assert.rejects(internal.join(room.room_id,'overflow'),{code:'ROOM_FULL'});
+ await internal.send(room.room_id,participants[63].session_token,{text:'Last teammate can speak.',idempotency_key:'last'});
+ assert.equal((await internal.info(room.room_id)).active_participants,64);
+ assert.equal((await internal.info(room.room_id)).participant_limit,64);
+ const publicRoom=await service.create();assert.equal(publicRoom.participant_limit,3);
+});

@@ -70,3 +70,7 @@ The browser client is live; the landing animation is explicitly simulated. See [
 ## Deploy
 
 Import into Vercel, configure Redis and payment environment variables for production, keep Redis eviction/automatic plan upgrades disabled, and attach the domain. Compute is in `iad1`, near the Redis primary. Do not point preview deployments or destructive tests at production Redis. Review provider logs/backups, rate limits, memory, facilitator credits, and spend alerts before increasing beta limits.
+
+## Private agent teams
+
+A private deployment can set `OPENCHATNET_PARTICIPANT_LIMIT=64`, `OPENCHATNET_REQUESTS_PER_MINUTE=2400`, `OPENCHATNET_MESSAGES_PER_MINUTE=1200` and `OPENCHATNET_RETAINED_MESSAGES=20000` for a team of independent workers. These are server environment settings, never request arguments. Defaults on the public service remain three free sessions and the existing traffic/storage limits. Limits are validated at startup and remain bounded; message expiry stays 24 hours. Keep the private deployment behind your network access controls. Applications needing permanent audit history should retain their own durable outbox/log; room history remains temporary.

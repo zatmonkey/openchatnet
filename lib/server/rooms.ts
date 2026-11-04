@@ -1,3 +1,4 @@
+import { roomLimits,type RoomLimits } from './limits';
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
@@ -67,7 +68,7 @@ const errors: Record<string, [number, string]> = {
   ROOM_NOT_FOUND: [404, "Room not found or idle for seven days."],
   ROOM_FULL: [
     409,
-    "Three sending sessions are available. Upgrade this room for more.",
+    "The deployment’s sending-session capacity is full. Leave a session or upgrade this room.",
   ],
   SESSION_EXPIRED: [401, "Session missing or expired. Join again."],
   IDEMPOTENCY_CONFLICT: [
@@ -76,7 +77,7 @@ const errors: Record<string, [number, string]> = {
   ],
   ROOM_STORAGE_FULL: [
     429,
-    "Room has 1,000 unexpired messages. Wait for messages to expire.",
+    "The room reached its unexpired message limit. Wait for messages to expire.",
   ],
   RATE_LIMITED: [429, "Message rate limit reached. Retry in 60 seconds."],
 };
@@ -85,6 +86,7 @@ export class RoomService {
   constructor(
     public database: Store = store,
     public now: () => number = Date.now,
+    private limits:RoomLimits = roomLimits(),
   ) {}
 
   private async execute<T>(
@@ -102,7 +104,7 @@ export class RoomService {
         `${key}:order`,
         `${key}:messages`,
       ],
-      [operation, this.now(), JSON.stringify({ room_id: roomId, ...input })],
+      [operation, this.now(), JSON.stringify({ room_id: roomId, ...input, limits:this.limits })],
     );
     const result = typeof raw === "string" ? JSON.parse(raw) : raw;
     if (result.error) {
